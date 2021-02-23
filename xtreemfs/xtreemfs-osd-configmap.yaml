@@ -1,0 +1,44 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: xtreemfs-osd-conf
+data:
+  osdconfig.properties: |
+    # XtreemFS osd 配置
+    listen.port = 32640
+    http_port = 30640
+    listen.address = 0.0.0.0
+    dir_service.host = xtreemfs-dir-0.xtreemfs-dir.default.svc.cluster.local
+    dir_service.port = 32638
+    dir_service1.host = xtreemfs-dir-1.xtreemfs-dir.default.svc.cluster.local
+    dir_service1.port = 32638
+    dir_service2.host = xtreemfs-dir-2.xtreemfs-dir.default.svc.cluster.local
+    dir_service2.port = 32638
+    object_dir = /var/lib/xtreemfs/objs/
+    local_clock_renewal = 0
+    remote_time_sync = 60000
+    ssl.enabled = false
+    ssl.service_creds = /etc/xos/xtreemfs/truststore/certs/osd.p12
+    ssl.service_creds.pw = 12344321
+    ssl.service_creds.container = pkcs12
+    ssl.trusted_certs = /etc/xos/xtreemfs/truststore/certs/trusted.jks
+    ssl.trusted_certs.pw = 12344321
+    ssl.trusted_certs.container = jks
+    report_free_space = true
+    checksums.enabled = false
+    checksums.algorithm = Adler32
+    capability_secret = secretPassphrase
+    policy_dir = /etc/xos/xtreemfs/policies
+    snmp.enabled = true
+    snmp.address = 0.0.0.0
+    snmp.port = 34640
+    snmp.aclfile = /etc/xos/xtreemfs/snmp.acl
+  snmp.acl: |
+    acl = {
+      {
+        communities = public
+        access = read-only
+        managers = 0.0.0.0/0
+      }
+    }

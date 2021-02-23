@@ -1,0 +1,51 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: fluent
+  labels:
+    app: fluent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fluent
+  serviceName: fluent
+  template:
+    metadata:
+      labels:
+        app: fluent
+    spec:
+      containers:
+      - image: node1.huoyin.com:5000/amd64/amd64-fluent:1.11
+        imagePullPolicy: IfNotPresent
+        name: fluent
+        ports:
+        - containerPort: 9998
+        readinessProbe:
+          tcpSocket:
+            port: 9998
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+        livenessProbe:
+          tcpSocket:
+            port: 9998
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fluent
+spec:
+  type: NodePort
+  ports:
+    - name: fluent-9998
+      nodePort: 9998
+      port: 9998
+      targetPort: 9998
+      protocol: TCP
+  selector:
+    app: fluent

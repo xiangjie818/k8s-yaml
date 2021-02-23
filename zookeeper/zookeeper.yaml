@@ -1,0 +1,110 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zk-conf
+data:
+  zoo.cfg: |
+    # zookeeper config
+    tickTime=10000
+    initLimit=20
+    syncLimit=10
+    dataDir=/zookeeper/data
+    dataLogDir=/zookeeper/logs
+    server.0=zk-0.zk.default.svc.cluster.local:2888:3888
+    server.1=zk-1.zk.default.svc.cluster.local:2888:3888
+    server.2=zk-2.zk.default.svc.cluster.local:2888:3888
+    clientPort=2181
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zk
+spec:
+  clusterIP: None
+  ports:
+  - name: zk-client
+    port: 2181
+#    targetPort: 2181
+  - name: zk-server
+    port: 2888
+#    targetPort: 2888
+  - name: zk-leader-election
+    port: 3888
+#    targetPort: 3888
+  selector:
+    app: zk
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zk
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: zk
+  serviceName: zk
+  template:
+    metadata:
+      labels:
+        app: zk
+    spec:
+      initContainers:
+        - name: init-zk
+          image: harbor.huoyin.com:5000/amd64/amd64-zookeeper:3.6.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: client
+              containerPort: 2181
+            - name: server
+              containerPort: 2888
+            - name: leader-election
+              containerPort: 3888
+          command:
+            - bash
+            - "-c"
+            - |
+              id=$(hostname | awk -F"[-.]" '{print $2}')
+              echo $id > /zookeeper/data/myid
+          volumeMounts:
+            - name: zk-data
+              mountPath: /zookeeper/data
+      containers:
+        - name: zk
+          image: harbor.huoyin.com:5000/amd64/amd64-zookeeper:3.6.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: client
+              containerPort: 2181
+            - name: server
+              containerPort: 2888
+            - name: leader-election
+              containerPort: 3888
+          readinessProbe:
+            tcpSocket:
+              port: 2181
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            tcpSocket:
+              port: 2181
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: zk-data
+              mountPath: /zookeeper/data
+            - name: zoo-cfg
+              mountPath: /zookeeper/conf/zoo.cfg
+              subPath: zoo.cfg
+      volumes:
+        - name: zk-data
+          emptyDir: {}
+        - name: zoo-cfg
+          configMap:
+            name: zk-conf
+            items:
+              - key: zoo.cfg
+                path: zoo.cfg

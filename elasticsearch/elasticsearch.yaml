@@ -1,0 +1,61 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: elasticsearch
+  labels:
+    app: elasticsearch
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: elasticsearch
+  serviceName: elasticsearch
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+    spec:
+      securityContext:
+        runAsUser: 1000
+      containers:
+      - image: node1.huoyin.com:5000/amd64/amd64-elasticsearch:6.7.2
+        imagePullPolicy: IfNotPresent
+        name: elasticsearch
+        ports:
+        - containerPort: 9200
+        - containerPort: 9300
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 9200
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 9200
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+spec:
+  type: NodePort
+  ports:
+    - name: es-9200
+      nodePort: 9200
+      port: 9200
+      targetPort: 9200
+      protocol: TCP
+    - name: es-9300
+      nodePort: 9300
+      port: 9300
+      targetPort: 9300
+      protocol: TCP
+  selector:
+    app: elasticsearch

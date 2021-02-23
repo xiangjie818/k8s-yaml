@@ -1,0 +1,90 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-conf
+data:
+  start-kafka.sh: |
+    #!/bin/bash
+    HOSTNAME=$(hostname -f)
+    sed -i "s@^advertised.listeners.*@advertised.listeners=PLAINTEXT://${HOSTNAME}:9092@" /kafka/config/server.properties
+    sed -i "s@^listeners=.*@listeners=${LISTENERS}@" /kafka/config/server.properties
+    sed -i "s@^zookeeper.connect=.*@zookeeper.connect=${ZOOKEEPER_CONNECT}@" /kafka/config/server.properties
+    /kafka/bin/kafka-server-start.sh /kafka/config/server.properties
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+spec:
+  ports:
+  - name: kafka
+    port: 9092
+    targetPort: 9092
+  selector:
+    app: kafka
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kafka
+  serviceName: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+     # initContainers:
+     #   - name: init-kafka
+     #     image: harbor.huoyin.com:5000/amd64/amd64-kafka:2.12
+     #     imagePullPolicy: IfNotPresent
+     #     env:
+     #       - name: ZOOKEEPER_CONNECT
+     #         value: zk-0.zk.default.svc.cluster.local:2181,zk-1.zk.default.svc.cluster.local:2181,zk-2.zk.default.svc.cluster.local:2181
+     #       - name: LISTENERS
+     #         value: PLAINTEXT://0.0.0.0:9092
+     #     volumeMounts:
+     #       - name: kafka-start
+     #         mountPath: /start-kafka.sh
+     #         subPath: start-kafka.sh
+      containers:
+        - name: kafka
+          image: harbor.huoyin.com:5000/amd64/amd64-kafka:2.12
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ZOOKEEPER_CONNECT
+              value: zk-0.zk.default.svc.cluster.local:2181,zk-1.zk.default.svc.cluster.local:2181,zk-2.zk.default.svc.cluster.local:2181
+            - name: LISTENERS
+              value: PLAINTEXT://0.0.0.0:9092
+          ports:
+            - name: kafka
+              containerPort: 9092
+          readinessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: kafka-start
+              mountPath: /start-kafka.sh
+              subPath: start-kafka.sh
+      volumes:
+        - name: kafka-start
+          configMap:
+            name: kafka-conf
+            defaultMode: 0777
+            items:
+              - key: start-kafka.sh
+                path: start-kafka.sh

@@ -1,0 +1,149 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: xtreemfs-mrc-conf
+data:
+  mrcconfig.properties: |
+    # xtreemfs dir 配置
+    listen.port = 32636
+    http_port = 30636
+    listen.address = 0.0.0.0
+    osd_check_interval = 10
+    dir_service.host = xtreemfs-dir-0.xtreemfs-dir.default.svc.cluster.local
+    dir_service.port = 32638
+    dir_service.1.host = xtreemfs-dir-1.xtreemfs-dir.default.svc.cluster.local
+    dir_service.1.port = 32638
+    dir_service.2.host = xtreemfs-dir-2.xtreemfs-dir.default.svc.cluster.local
+    dir_service.2.port = 32638
+    no_atime = true
+    local_clock_renewal = 0
+    remote_time_sync = 60000
+    ssl.enabled = false
+    ssl.service_creds = /etc/xos/xtreemfs/truststore/certs/mrc.p12
+    ssl.service_creds.pw = 12344321
+    ssl.service_creds.container = pkcs12
+    ssl.trusted_certs = /etc/xos/xtreemfs/truststore/certs/trusted.jks
+    ssl.trusted_certs.pw = 12344321
+    ssl.trusted_certs.container = jks
+    authentication_provider = org.xtreemfs.common.auth.NullAuthProvider
+    policy_dir = /etc/xos/xtreemfs/policies
+    capability_secret = secretPassphrase
+    babudb.debug.level = 4
+    babudb.baseDir = /var/lib/xtreemfs/mrc/database
+    babudb.logDir = /var/lib/xtreemfs/mrc/db-log
+    babudb.sync = FDATASYNC
+    babudb.worker.maxQueueLength = 250
+    babudb.worker.numThreads = 0
+    babudb.maxLogfileSize = 16777216
+    babudb.checkInterval = 300
+    babudb.pseudoSyncWait = 0
+    babudb.plugin.0 = /etc/xos/xtreemfs/server-repl-plugin/mrc.properties
+  mrc.properties: |
+    babudb.repl.participant.0 = xtreemfs-mrc-0.xtreemfs-mrc.default.svc.cluster.local
+    babudb.repl.participant.0.port = 35676
+    babudb.repl.participant.1 = xtreemfs-mrc-1.xtreemfs-mrc.default.svc.cluster.local
+    babudb.repl.participant.1.port = 35676
+    babudb.repl.participant.2 = xtreemfs-mrc-2.xtreemfs-mrc.default.svc.cluster.local
+    babudb.repl.participant.2.port = 35676
+    babudb.repl.sync.n = 2
+    babudb.repl.backupDir = /var/lib/xtreemfs/server-repl-mrc
+    plugin.jar = /usr/share/java/babudb-replication-plugin.jar
+---
+# XtreemFS Dir Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: xtreemfs-mrc
+spec:
+  type: NodePort
+  ports:
+  - name: http-port
+    port: 30636
+    nodePort: 30636
+    targetPort: 30636
+  - name: listen-port
+    port: 32636
+    nodePort: 32636
+    targetPort: 32636
+  - name: repl-port
+    port: 35676
+    nodePort: 35676
+    targetPort: 35676
+  selector:
+    app: xtreemfs-mrc
+---
+# XtreemFS Dir StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: xtreemfs-mrc
+spec:
+  replicas: 3  # 可以是1个或更多
+  selector:
+    matchLabels:
+      app: xtreemfs-mrc
+  serviceName: xtreemfs-mrc  # 必须指定service
+  template:
+    metadata:
+      labels:
+        app: xtreemfs-mrc
+    spec:
+      initContainers:
+        - name: init-xtreemfs-mrc
+          image: harbor.huoyin.com:5000/amd64/amd64-xtfs-mrc:1.6.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - bash
+            - "-c"
+            - |
+              set -ex
+              UUID=$(uuidgen)
+              HOSTNAME=$(hostname -f)
+              mkdir /etc/xos/xtreemfs/server-repl-plugin -p
+              cp -f /mnt/mrcconfig.properties /etc/xos/xtreemfs/mrcconfig.properties
+              cp -f /mnt/mrc.properties /etc/xos/xtreemfs/server-repl-plugin/mrc.properties
+              chown -R root:xtreemfs /etc/xos/xtreemfs/*
+              echo "uuid = ${UUID}" >> /etc/xos/xtreemfs/mrcconfig.properties
+              echo "hostname = ${HOSTNAME}" >> /etc/xos/xtreemfs/mrcconfig.properties
+          volumeMounts:
+            - name: xtreemfs-mrc-conf
+              mountPath: /etc/xos/xtreemfs/
+            - name: config-map
+              mountPath: /mnt/
+      containers:
+        - name: xtreemfs-mrc
+          image: harbor.huoyin.com:5000/amd64/amd64-xtfs-mrc:1.6.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http-port
+              containerPort: 30636
+            - name: listen-port
+              containerPort: 32636
+            - name: repl-port
+              containerPort: 35676
+          startupProbe:
+            tcpSocket:
+              port: 30636
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 30636
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: xtreemfs-mrc-conf
+              mountPath: /etc/xos/xtreemfs/
+  #          - name: xtreemfs-dir-database
+  #            mountPath: /var/lib/xtreemfs/dir/database
+      volumes:
+        - name: xtreemfs-mrc-conf
+          emptyDir: {}
+        - name: config-map
+          configMap:
+            name: xtreemfs-mrc-conf
+ #       - name: xtreemfs-dir-database
+ #         hostPath:
+ #           path: "/var/lib/xtreemfs-dir-database"

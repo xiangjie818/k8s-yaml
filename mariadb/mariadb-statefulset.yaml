@@ -1,0 +1,289 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mariadb-conf
+data:
+  master.cnf: |
+    # Master配置
+    [mysqld]
+    skip-host-cache
+    skip-name-resolve
+    binlog-format=ROW
+    log-slave-updates=True
+    master-info-repository=TABLE
+    relay-log-info-repository=TABLE
+    sync-master-info=1
+    slave-parallel-threads=3
+    binlog-checksum=CRC32
+    master-verify-checksum=1
+    slave-sql-verify-checksum=1
+    binlog-rows-query-log-events=1
+    server_id = 103
+    log-bin = mariadb-bin
+  slave.cnf: |
+    # Slave配置
+    [mysqld]
+    replicate-ignore-db=mysql
+    log-bin=mariadb-slave-bin
+    relay-log=relay-mariadb-bin
+    skip-host-cache
+    skip-name-resolve
+    read_only=on
+  init-master.sql: |
+    grant replication slave on *.* to 'slave'@'%' identified by '123456';
+    GRANT ALL PRIVILEGES ON *.* TO 'admin'@'%' IDENTIFIED BY 'admin@2020';
+    flush privileges;
+  init-slave.sql: |
+    source /etc/mysql/conf.d/backup.sql
+    change master to master_host='mariadb-master',master_user='slave',master_password='123456',master_port=3306,master_use_gtid=slave_pos;
+    start slave;
+  reset-slave.sh: |
+    #!/bin/sh
+    # wait mysqld startup
+    until mysql -uroot -p${MYSQL_ROOT_PASSWORD} -e "SELECT 1"; do sleep 1; done
+    # reset slave
+    mysql -uroot -p${MYSQL_ROOT_PASSWORD} <<EOF
+    stop slave;
+    reset slave;
+    CHANGE MASTER TO MASTER_HOST='mariadb-master',MASTER_USER='slave',MASTER_PASSWORD='123456',master_port=3306,master_use_gtid=slave_pos;
+    start slave;
+    EOF
+---
+# MySQL Master Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb-master
+spec:
+  type: NodePort
+  ports:
+  - name: mariadb
+    port: 3306
+    protocol: TCP
+    targetPort: 3306
+    nodePort: 3306
+  selector:
+    app: mariadb-master
+---
+# MySQL Master Statefulset
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mariadb-master
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mariadb-master
+  serviceName: mariadb-master
+  template:
+    metadata:
+      labels:
+        app: mariadb-master
+    spec:
+      containers:
+        - name: mariadb
+          image: node1.huoyin.com:5000/amd64/amd64-mariadb:10.3.28
+          imagePullPolicy: IfNotPresent
+          readinessProbe:
+            tcpSocket:
+              port: 3306
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            tcpSocket:
+              port: 3306
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+         # livenessProbe:
+         #   exec:
+         #     command: ["mysqladmin", "-uroot", "-p$(MYSQL_ROOT_PASSWORD)", "ping"]
+         #   initialDelaySeconds: 10
+         #   periodSeconds: 10
+         #   timeoutSeconds: 3
+         # readinessProbe:
+         #   exec:
+         #     command: ["mysql", "-uroot", "-p$(MYSQL_ROOT_PASSWORD)", "-e", "SELECT 1"]
+         #   initialDelaySeconds: 10
+         #   periodSeconds: 10
+         #   timeoutSeconds: 3
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: 'root'
+          ports:
+            - containerPort: 3306
+              name: mariadb
+              protocol: TCP
+          volumeMounts:
+            - name: mariadb-master-data
+              mountPath: /var/lib/mysql
+            - name: mariadb-conf
+              mountPath: /etc/mysql/conf.d/
+            - name: mariadb-init
+              mountPath: /docker-entrypoint-initdb.d/
+      volumes:
+        - name: mariadb-master-data
+#          flexVolume:
+#            driver: "huoyin/nfs"
+#            fsType: "nfs"
+#            options:
+#              server: "192.168.0.10"
+#              share: "/data"
+#          persistentVolumeClaim:
+#            claimName: mysql-data
+#        - name: mariadb-master-data
+          hostPath:
+            path: "/var/lib/mysql-master"
+        - name: mariadb-conf
+          configMap:
+            name: mariadb-conf
+            items:
+              - key: master.cnf
+                path: master.cnf
+        - name: mariadb-init
+          configMap:
+            name: mariadb-conf
+            items:
+              - key: init-master.sql
+                path: init.sql
+#  volumeClaimTemplates:
+#  - metadata:
+#      name: mariadb-master-data
+#      annotations:
+#        volume.beta.kubernetes.io/storage-class: "slow"
+#    spec:
+#      accessModes: [ "ReadWriteOnce" ]
+#      resources:
+#        requests:
+#          storage: 5Gi
+---
+# MySQL Slave Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb-slave
+spec:
+  type: ClusterIP   # 提供MySQL只读服务
+  ports:
+  - name: mariadb
+    port: 3306
+    protocol: TCP
+    targetPort: 3306
+  selector:
+    app: mariadb-slave
+---
+# MySQL Slave Statefulset
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mariadb-slave
+spec:
+  replicas: 1  # 可以是1个或更多
+  selector:
+    matchLabels:
+      app: mariadb-slave
+  serviceName: mariadb-slave  # 必须指定service
+  template:
+    metadata:
+      labels:
+        app: mariadb-slave
+    spec:
+      initContainers:
+        - name: init-mariadb
+          image: node1.huoyin.com:5000/amd64/amd64-mariadb:10.3.28
+          imagePullPolicy: IfNotPresent
+          env:
+          - name: MYSQL_ROOT_PASSWORD
+            value: 'root'
+          ports:
+            - containerPort: 3306
+              name: mariadb
+              protocol: TCP
+          command:
+            - bash
+            - "-c"
+            - |
+              set -ex
+              cp /mnt/slave.cnf /etc/mysql/conf.d/slave.cnf
+              pod_number=$[RANDOM%100+1]
+              echo "server-id=$pod_number" >> /etc/mysql/conf.d/slave.cnf
+              mysqldump -hmariadb-master -uadmin -padmin@2020 --flush-logs --master-data=2 --single-transaction --routines --triggers --events --all-databases  > /etc/mysql/conf.d/backup.sql
+          volumeMounts:
+            - name: server-conf
+              mountPath: /etc/mysql/conf.d/
+            - name: mariadb-slave-conf
+              mountPath: /mnt/
+      containers:
+        - name: mariadb
+          image: node1.huoyin.com:5000/amd64/amd64-mariadb:10.3.28
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: 'root'
+          lifecycle:
+            postStart:
+              exec:
+                command: ["/bin/sh","-c","if [ -f '/var/lib/mysql/mariadb-slave-bin.index' ]; then sh /reset-slave.sh; fi"]
+          livenessProbe:
+            tcpSocket:
+              port: 3306
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+#            exec:
+#              command: ["mysqladmin", "-uroot", "-p$(MYSQL_ROOT_PASSWORD)", "ping"]
+#            initialDelaySeconds: 10
+#            periodSeconds: 10
+#            timeoutSeconds: 3
+          ports:
+            - containerPort: 3306
+              name: mariadb
+              protocol: TCP
+          volumeMounts:
+            - name: mariadb-slave-data
+              mountPath: /var/lib/mysql
+            - name: server-conf
+              mountPath: /etc/mysql/conf.d/
+            - name: mariadb-slave-init
+              mountPath: /docker-entrypoint-initdb.d/
+            - name: mysql-slave-reset
+              mountPath: /reset-slave.sh
+              subPath: reset-slave.sh
+      volumes:
+        - name: mariadb-slave-data
+          hostPath:
+            path: "/var/lib/mysql-slave"
+        - name: server-conf
+          emptyDir: {}
+        - name: mariadb-slave-conf
+          configMap:
+            name: mariadb-conf
+            items:
+              - key: slave.cnf
+                path: slave.cnf
+        - name: mariadb-slave-init
+          configMap:
+            name: mariadb-conf
+            items:
+              - key: init-slave.sql
+                path: init-slave.sql
+        - name: mysql-slave-reset
+          configMap:
+            name: mariadb-conf
+            defaultMode: 0777
+            items:
+              - key: reset-slave.sh
+                path: reset-slave.sh
+#  volumeClaimTemplates:
+#  - metadata:
+#      name: mariadb-slave-data
+#      annotations:
+#        volume.beta.kubernetes.io/storage-class: "slow"
+#    spec:
+#      accessModes: [ "ReadWriteOnce" ]
+#      resources:
+#        requests:
+#          storage: 5Gi

@@ -1,0 +1,107 @@
+---
+# XtreemFS OSD Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: xtreemfs-osd2
+spec:
+  ports:
+  - name: http-port
+    port: 30640
+    targetPort: 30640
+  - name: listen-port
+    port: 32640
+    targetPort: 32640
+  - name: proxy-port
+    port: 34640
+    targetPort: 34640
+  selector:
+    app: xtreemfs-osd2
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: xtreemfs-osd2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: xtreemfs-osd2
+  serviceName: xtreemfs-osd2
+  template:
+    metadata:
+      labels:
+        app: xtreemfs-osd2
+    spec:
+      initContainers:
+        - name: init-xtreemfs-osd
+          image: harbor.huoyin.com:5000/amd64/amd64-xtfs-osd:1.6.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - bash
+            - "-c"
+            - |
+              HOSTNAME=$(hostname -f)
+              cp -f /mnt/osdconfig.properties /etc/xos/xtreemfs/osdconfig.properties
+              cp -f /mnt/snmp.acl /etc/xos/xtreemfs/snmp.acl
+              chown -R root:xtreemfs /etc/xos/xtreemfs/*
+              chown -R xtreemfs:xtreemfs /var/lib/xtreemfs/objs/
+              echo "uuid = ${UUID}" >> /etc/xos/xtreemfs/osdconfig.properties
+              echo "hostname = ${HOSTNAME}" >> /etc/xos/xtreemfs/osdconfig.properties
+              sed -i "s@^listen.port.*@listen.port = ${LISTEN_PORT}@g" /etc/xos/xtreemfs/osdconfig.properties
+              sed -i "s@^http_port.*@http_port = ${HTTP_PORT}@g" /etc/xos/xtreemfs/osdconfig.properties
+              sed -i "s@^snmp.port.*@snmp.port = ${SNMP_PORT}@g" /etc/xos/xtreemfs/osdconfig.properties
+          env:
+            - name: UUID
+              value: "b6ed7847-79d8-4be7-95ca-d5a6cef27838"
+            - name: HTTP_PORT
+              value: "30640"
+            - name: LISTEN_PORT
+              value: "32640"
+            - name: SNMP_PORT
+              value: "34640"
+          volumeMounts:
+            - name: xtreemfs-osd-conf
+              mountPath: /etc/xos/xtreemfs/
+            - name: config-map
+              mountPath: /mnt/
+            - name: object-dir
+              mountPath: /var/lib/xtreemfs/objs/
+      nodeSelector:
+        kubernetes.io/hostname: node2.hy.com
+      containers:
+        - name: xtreemfs-osd
+          image: harbor.huoyin.com:5000/amd64/amd64-xtfs-osd:1.6.0
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: xtreemfs-osd-conf
+              mountPath: /etc/xos/xtreemfs/
+            - name: object-dir
+              mountPath: /var/lib/xtreemfs/objs/
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 30640
+              httpHeaders:
+              - name: Custom-Header
+                value: Awesome
+            initialDelaySeconds: 3
+            periodSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 30640
+              httpHeaders:
+              - name: Custom-Header
+                value: Awesome
+            initialDelaySeconds: 3
+            periodSeconds: 3
+      volumes:
+        - name: xtreemfs-osd-conf
+          emptyDir: {}
+        - name: config-map
+          configMap:
+            name: xtreemfs-osd-conf
+        - name: object-dir
+          hostPath:
+            path: "/xtreemfs/osd2/"
