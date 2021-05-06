@@ -50,9 +50,11 @@ spec:
       labels:
         app: zk
     spec:
+      imagePullSecrets:
+        - name: aliyun
       initContainers:
         - name: init-zk
-          image: harbor.huoyin.com:5000/amd64/amd64-zookeeper:3.6.2
+          image: registry.cn-beijing.aliyuncs.com/xtreemfs/zookeeper:3.6.2-alpine-amd64
           imagePullPolicy: IfNotPresent
           ports:
             - name: client
@@ -72,7 +74,7 @@ spec:
               mountPath: /zookeeper/data
       containers:
         - name: zk
-          image: harbor.huoyin.com:5000/amd64/amd64-zookeeper:3.6.2
+          image: registry.cn-beijing.aliyuncs.com/xtreemfs/zookeeper:3.6.2-alpine-amd64
           imagePullPolicy: IfNotPresent
           ports:
             - name: client
