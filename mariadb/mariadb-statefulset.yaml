@@ -82,9 +82,11 @@ spec:
       labels:
         app: mariadb-master
     spec:
+      imagePullSecrets:
+        - name: aliyun
       containers:
         - name: mariadb
-          image: node1.huoyin.com:5000/amd64/amd64-mariadb:10.3.28
+          image: registry.cn-beijing.aliyuncs.com/xtreemfs/mariadb:10.3-amd64
           imagePullPolicy: IfNotPresent
           readinessProbe:
             tcpSocket:
@@ -136,7 +138,7 @@ spec:
 #            claimName: mysql-data
 #        - name: mariadb-master-data
           hostPath:
-            path: "/var/lib/mysql-master"
+            path: "/data/mysql-master"
         - name: mariadb-conf
           configMap:
             name: mariadb-conf
@@ -191,9 +193,11 @@ spec:
       labels:
         app: mariadb-slave
     spec:
+      imagePullSecrets:
+        - name: aliyun
       initContainers:
         - name: init-mariadb
-          image: node1.huoyin.com:5000/amd64/amd64-mariadb:10.3.28
+          image: registry.cn-beijing.aliyuncs.com/xtreemfs/mariadb:10.3-amd64
           imagePullPolicy: IfNotPresent
           env:
           - name: MYSQL_ROOT_PASSWORD
@@ -218,7 +222,7 @@ spec:
               mountPath: /mnt/
       containers:
         - name: mariadb
-          image: node1.huoyin.com:5000/amd64/amd64-mariadb:10.3.28
+          image: registry.cn-beijing.aliyuncs.com/xtreemfs/mariadb:10.3-amd64
           imagePullPolicy: IfNotPresent
           env:
             - name: MYSQL_ROOT_PASSWORD
@@ -255,7 +259,7 @@ spec:
       volumes:
         - name: mariadb-slave-data
           hostPath:
-            path: "/var/lib/mysql-slave"
+            path: "/data/mysql-slave"
         - name: server-conf
           emptyDir: {}
         - name: mariadb-slave-conf
